@@ -1,24 +1,106 @@
 # Seasonal Goals
 
-Tracks per-character progress toward seasonal goals across your account. The
-first (and currently only) goal type is **tier set transmog**: for each class
-and slot, are you wearing/holding an item that could catalyze into the target
-difficulty's appearance — and have you actually collected the appearance yet.
+A grid-at-a-glance tracker for your account's seasonal tier transmog goals.
 
-## Status
+For every class and every tier slot, see whether you have the appearance
+collected, whether you're holding an item that could catalyze into it, and
+whether you actually have catalyst charges to do it right now — all in one
+13 × 9 window with no per-character bookkeeping.
 
-Pre-alpha scaffold. The UI currently shows fake data so the layout can be
-iterated on; the scanner and `/sg discover` season-bootstrap command are stubs.
+![grid screenshot placeholder](docs/screenshot.png)
+
+## What it tells you
+
+Each cell shows one **state** for one (class, tier slot, target difficulty):
+
+| Symbol | State | Meaning |
+|:---:|---|---|
+| ✓ | **Collected** | The account has unlocked this visual (any source counts) |
+| **!** | **Catalyzable now** | Some character of this class has an item that could catalyze, AND has charges |
+| **•** | **Have item — no charges** | Some character of this class has the item, but is out of catalyst charges |
+| ✗ | **Missing** | No tracked character of this class has a contributing item |
+| — | **No data** | We don't have shipped data for this class+slot yet |
+
+The bottom row shows each class's current catalyst charge count (max across
+all enabled characters of that class). Hover a class icon to see a per-class
+progress summary; click an actionable cell to open a detail panel listing the
+items, what each could catalyze to, and a per-item exclude/include toggle.
+
+## Multi-character
+
+State is aggregated per-class across every character on your account:
+
+- **Collected** is naturally account-wide (transmog appearance collection is
+  account-shared in modern WoW).
+- **Catalyzable / Have item** is "any enabled character of this class has it"
+  — so if Warlock A holds the Hero 5 bracer and Warlock B doesn't, the
+  warlock-wrist cell still goes catalyzable.
+- The detail panel breaks down which character holds what, with an
+  exclude/include checkbox per item GUID so you can mark "this piece is
+  reserved for stats, don't count it toward the look".
+
+## Accessibility
+
+- **State is encoded by both color and symbol.** Even in monochrome, every
+  cell carries a glyph the color can't lose.
+- **Palette presets** in config: Default, Deuteranopia, Protanopia,
+  Tritanopia, Monochrome. Swap from the config window.
+- **Resizable cells**: the cell-size slider and the corner drag-grip both
+  control how big the grid renders.
+- **Window positions persist** across `/reload` and sessions.
 
 ## Slash commands
 
-- `/sg` — toggle the main window
-- `/sg discover` — (stub) dump the current season's tier set appearance IDs and
-  catalyst currency ID for pasting into `src/data_season.lua`
+| Command | Effect |
+|---|---|
+| `/sg` | Toggle the main grid |
+| `/sg config` | Open the config window |
+| `/sg refresh [class]` | Clear the visual-cache (all classes, or just one). Accepts class names case-insensitively. |
+| `/sg help` | List commands |
 
-## How seasonal data gets refreshed
+(Discovery and debug tools are dev-mode-gated; not surfaced to end users.)
 
-Each new raid tier ships a new tier set with new appearance IDs and a new
-catalyst currency. At season start, log in on one character of each class and
-run `/sg discover`; paste the dumped table into `src/data_season.lua` and
-commit. From then on the addon just reads from that file.
+## How catalyst-eligibility is decided
+
+The addon scans bags + equipped slots for every character that logs in,
+parses each item's track and rank from its tooltip, and stores
+`(itemGUID → {track, rank, slot, …})` per-character in SavedVariables. An
+item "contributes" to a (slot, difficulty) cell if its same-track upgrade
+path can reach that difficulty:
+
+| Track | Rank | Could produce |
+|---|---|---|
+| Veteran | 1–4 | LFR, Normal |
+| Veteran | 5–6 | Normal |
+| Champion | 1–4 | Normal, Heroic |
+| Champion | 5–6 | Heroic |
+| Hero | 1–4 | Heroic, Mythic |
+| Hero | 5–6 | Mythic |
+| Myth | 1–6 | Mythic |
+
+When a visual is collected, items whose entire contribution set is now
+covered get pruned automatically — storage stays bounded as you complete
+the season.
+
+## Per-season data refresh
+
+Each new raid tier ships new appearance IDs and a new catalyst currency.
+At season start the addon maintainer runs the dev-mode discover tooling
+on one character per class, captures the data into `src/data_season.lua`,
+and ships an update. End users get the new tier just by updating the
+addon — no per-user setup.
+
+## Installation
+
+For now, clone into your WoW AddOns folder:
+
+```
+git clone git@github.com:Druiddeleted/SeasonalGoals.git \
+  "<wow>/Interface/AddOns/SeasonalGoals"
+```
+
+CurseForge release pending project setup.
+
+## License
+
+[MIT](LICENSE).
