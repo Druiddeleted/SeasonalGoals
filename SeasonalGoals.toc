@@ -1,0 +1,17 @@
+## Interface: 120005
+## Title: Seasonal Goals
+## Notes: Track per-character progress toward seasonal goals (tier set transmog, more later).
+## Author: Druiddeleted
+## Version: 0.1.0
+## SavedVariables: SeasonalGoalsDB
+
+src\db.lua
+src\constants.lua
+src\data_season.lua
+src\catalyst.lua
+src\visual_cache.lua
+src\scanner.lua
+src\discover.lua
+src\ui.lua
+src\minimap.lua
+src\core.lua

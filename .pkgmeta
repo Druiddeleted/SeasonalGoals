@@ -1,0 +1,11 @@
+package-as: SeasonalGoals
+
+ignore:
+  - .github
+  - .gitignore
+  - .pkgmeta
+  - CLAUDE.md
+  - LICENSE
+  - README.md
+
+manual-changelog: CHANGELOG.md
