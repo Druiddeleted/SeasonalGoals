@@ -7,8 +7,6 @@ collected, whether you're holding an item that could catalyze into it, and
 whether you actually have catalyst charges to do it right now — all in one
 13 × 9 window with no per-character bookkeeping.
 
-![grid screenshot placeholder](docs/screenshot.png)
-
 ## What it tells you
 
 Each cell shows one **state** for one (class, tier slot, target difficulty):
