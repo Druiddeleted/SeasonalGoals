@@ -2,3 +2,5 @@
 *.swp
 *.bak
 discover_dump.txt
+# Generated at release time from the tagged CHANGELOG.md section (see release.yml).
+RELEASE_NOTES.md

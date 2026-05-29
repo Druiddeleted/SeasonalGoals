@@ -10,4 +10,4 @@ ignore:
   - docs
   - scripts
 
-manual-changelog: CHANGELOG.md
+manual-changelog: RELEASE_NOTES.md

@@ -30,6 +30,28 @@ jobs:
           ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
 
+      - name: Extract release notes for this tag
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          # Strip a leading "v" so "v0.2.0" matches "## 0.2.0" in CHANGELOG.md.
+          VERSION="${TAG#v}"
+          # Copy lines under the matching "## <version>" heading (which may have
+          # a trailing date, e.g. "## 0.2.0 — 2026-05-29") up to the next "## ".
+          awk -v ver="$VERSION" '
+            /^## / {
+              if (found) exit
+              if ($2 == ver) { found = 1; next }
+            }
+            found { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::error::No CHANGELOG.md section found for version $VERSION"
+            exit 1
+          fi
+          echo "----- RELEASE_NOTES.md -----"
+          cat RELEASE_NOTES.md
+
       - name: Package & upload
         uses: BigWigsMods/packager@v2
         with:
