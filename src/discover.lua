@@ -3,7 +3,7 @@ local ADDON_NAME, NS = ...
 NS.Discover = {}
 local D = NS.Discover
 
--- Sub-commands:
+-- Sub-commands (also: /sg discover help):
 --   /sg discover            -- shorthand for `sets`
 --   /sg discover sets       -- list candidate tier sets for current class
 --   /sg discover set <id>   -- dump every source on that setID
@@ -11,6 +11,7 @@ local D = NS.Discover
 --   /sg discover season     -- auto-detect + compile current-season tier
 --                              set for the player's class
 --   /sg discover all        -- like `season`, but for every class in one go
+--   /sg discover feeders    -- capture convertible-feeder sources (data_sources.lua)
 --   /sg discover compile lfr=<id> normal=<id> heroic=<id> myth=<id>
 --                           -- manual fallback when auto-detect picks wrong.
 --   /sg discover currency <id>  -- print info for a currency ID (catalyst)
@@ -474,6 +475,140 @@ local function FindSeasonForClassBit(classBit)
 end
 
 -------------------------------------------------------------------------------
+-- /sg discover feeders
+-- Capture convertible-feeder sources: which boss / dungeon drops a same-slot
+-- piece (by armor type) you can run through the catalyst. Scans the Encounter
+-- Journal's "Current Season" tier (raids + the full M+ pool incl. legacy
+-- dungeons). Slot + armor type come from GetItemInfoInstant — static item data,
+-- so no appearance lookup and no async cache dependency (fixes prior coverage).
+-------------------------------------------------------------------------------
+local ARMOR_SUBCLASS = { [1] = "cloth", [2] = "leather", [3] = "mail", [4] = "plate" }
+local ARMOR_CLASS_ID = 4  -- Enum.ItemClass.Armor
+
+local function ResolveEJFull()
+    local CEJ = C_EncounterJournal or {}
+    return {
+        SelectTier          = EJ_SelectTier             or CEJ.SelectTier,
+        GetNumTiers         = EJ_GetNumTiers            or CEJ.GetNumTiers,
+        GetTierInfo         = EJ_GetTierInfo            or CEJ.GetTierInfo,
+        GetCurrentTier      = EJ_GetCurrentTier         or CEJ.GetCurrentTier,
+        GetInstanceByIndex  = EJ_GetInstanceByIndex     or CEJ.GetInstanceByIndex,
+        SelectInstance      = EJ_SelectInstance         or CEJ.SelectInstance,
+        GetEncounterByIndex = EJ_GetEncounterInfoByIndex or CEJ.GetEncounterInfoByIndex,
+        SelectEncounter     = EJ_SelectEncounter        or CEJ.SelectEncounter,
+        GetNumLoot          = EJ_GetNumLoot             or CEJ.GetNumLoot,
+        GetLootByIndex      = EJ_GetLootInfoByIndex     or CEJ.GetLootInfoByIndex,
+        SetDifficulty       = EJ_SetDifficulty          or CEJ.SetPreferredDifficulty,
+        SetLootFilter       = EJ_SetLootFilter          or CEJ.SetLootFilter,
+    }
+end
+
+local function LootItemIDOnly(getLoot, index)
+    local r1 = getLoot(index)
+    if type(r1) == "table" then return r1.itemID end
+    return r1
+end
+
+local function DiscoverFeeders()
+    local EJ = ResolveEJFull()
+    if type(EJ.GetLootByIndex) ~= "function" or type(EJ.GetInstanceByIndex) ~= "function" then
+        print("|cffff5555[SeasonalGoals]|r Encounter Journal loot API unavailable.")
+        return
+    end
+    if not (C_Item and C_Item.GetItemInfoInstant) then
+        print("|cffff5555[SeasonalGoals]|r C_Item.GetItemInfoInstant unavailable.")
+        return
+    end
+
+    -- Locate the "Current Season" tier (the seasonal pool, incl. legacy M+).
+    local numTiers = (EJ.GetNumTiers and EJ.GetNumTiers()) or 0
+    local tierNames, seasonTier = {}, nil
+    for t = 1, numTiers do
+        local name = EJ.GetTierInfo and EJ.GetTierInfo(t)
+        tierNames[t] = name or ("tier" .. t)
+        if name and name:lower():find("season") then seasonTier = t end
+    end
+    local prevTier = (EJ.GetCurrentTier and EJ.GetCurrentTier()) or nil
+
+    local feeders = { plate = {}, mail = {}, leather = {}, cloth = {}, back = {} }
+    local diag = { tierNames = tierNames, seasonTier = seasonTier,
+                   seasonTierName = seasonTier and tierNames[seasonTier] or nil,
+                   instances = {}, totalLoot = 0, classified = 0 }
+
+    local function addFeeder(armor, slot, source, itemID, dungeon)
+        local bucket
+        if slot == "back" then
+            bucket = feeders.back
+        else
+            if not (armor and feeders[armor]) then return end
+            feeders[armor][slot] = feeders[armor][slot] or {}
+            bucket = feeders[armor][slot]
+        end
+        for _, e in ipairs(bucket) do if e.itemID == itemID then return end end
+        table.insert(bucket, { source = source, itemID = itemID, dungeon = dungeon or nil })
+    end
+
+    local function scanTier(tierIdx, isRaid)
+        if not tierIdx then return end
+        EJ.SelectTier(tierIdx)
+        if EJ.SetLootFilter then EJ.SetLootFilter(0, 0) end
+        local i = 1
+        while true do
+            local instID, instName = EJ.GetInstanceByIndex(i, isRaid)
+            if not instID then break end
+            EJ.SelectInstance(instID)
+            if EJ.SetDifficulty then EJ.SetDifficulty(isRaid and 15 or 23) end
+            local instLoot, e = 0, 1
+            while true do
+                local encName, _, encID = EJ.GetEncounterByIndex(e, instID)
+                if not encName then break end
+                if EJ.SelectEncounter and encID then EJ.SelectEncounter(encID) end
+                local n = EJ.GetNumLoot() or 0
+                instLoot = instLoot + n
+                for li = 1, n do
+                    local itemID = LootItemIDOnly(EJ.GetLootByIndex, li)
+                    if itemID then
+                        diag.totalLoot = diag.totalLoot + 1
+                        local _, _, _, equipLoc, _, classID, subClassID = C_Item.GetItemInfoInstant(itemID)
+                        if classID == ARMOR_CLASS_ID and equipLoc then
+                            local slot = INVTYPE_TO_SLOT[equipLoc]
+                            if slot == "back" then
+                                addFeeder(nil, "back", ("%s — %s"):format(encName, instName), itemID, not isRaid)
+                                diag.classified = diag.classified + 1
+                            elseif slot and ARMOR_SUBCLASS[subClassID] then
+                                addFeeder(ARMOR_SUBCLASS[subClassID], slot,
+                                    ("%s — %s"):format(encName, instName), itemID, not isRaid)
+                                diag.classified = diag.classified + 1
+                            end
+                        end
+                    end
+                end
+                e = e + 1
+            end
+            table.insert(diag.instances, { name = instName, raid = isRaid or nil, loot = instLoot })
+            i = i + 1
+        end
+    end
+
+    local tier = seasonTier or numTiers
+    scanTier(tier, true)   -- raids in the seasonal pool
+    scanTier(tier, false)  -- dungeons in the seasonal pool (incl. legacy)
+    if prevTier and EJ.SelectTier then EJ.SelectTier(prevTier) end
+
+    SeasonalGoalsDB._devFeeders = { feeders = feeders, diag = diag }
+    print(("|cff33ff99[SeasonalGoals]|r feeders: tier=%q, %d loot, %d armor pieces classified."):format(
+        tostring(diag.seasonTierName or ("#" .. tier)), diag.totalLoot, diag.classified))
+    if not seasonTier then
+        print("  |cffff5555No 'Current Season' tier matched|r — used newest (#" .. tier .. "). Check _devFeeders.diag.tierNames.")
+    end
+    print("  |cffffd200Saved to SavedVariables._devFeeders — /reload to flush it to disk.|r")
+    ShowDump("feeders", "Captured to SeasonalGoalsDB._devFeeders.\nSeason tier: "
+        .. tostring(diag.seasonTierName) .. "\nLoot scanned: " .. diag.totalLoot
+        .. "\nArmor pieces classified: " .. diag.classified
+        .. "\n\n(Run /reload, then the maintainer reads _devFeeders off disk.)")
+end
+
+-------------------------------------------------------------------------------
 -- /sg discover all  — compile every class in one dump
 -------------------------------------------------------------------------------
 local function DiscoverAll()
@@ -518,6 +653,7 @@ local function DiscoverAll()
         print("  missing: " .. table.concat(missing, ", "))
         print("  (likely a class whose tier set this account hasn't browsed yet)")
     end
+
     ShowDump("all classes", table.concat(allLines, "\n"))
 end
 
@@ -620,6 +756,28 @@ local function DiscoverCurrency(idStr)
 end
 
 -------------------------------------------------------------------------------
+-- /sg discover help
+-------------------------------------------------------------------------------
+local DISCOVER_HELP = {
+    { "sets",            "list candidate tier sets for your class" },
+    { "set <id>",        "dump every source on a setID" },
+    { "variants <id>",   "dump appearance variants for a setID" },
+    { "season [name]",   "auto-detect + compile this class's tier set" },
+    { "all",             "compile every class -> paste into data_season.lua" },
+    { "feeders",         "capture convertible-feeder sources -> data_feeders.lua" },
+    { "compile lfr=.. normal=.. heroic=.. myth=..", "manual compile from setIDs" },
+    { "currency <id>",   "print info for a currency ID" },
+    { "help",            "show this list" },
+}
+local function DiscoverHelp()
+    print("|cff33ff99[SeasonalGoals]|r /sg discover subcommands:")
+    for _, row in ipairs(DISCOVER_HELP) do
+        print(("  |cffffd200%s|r — %s"):format(row[1], row[2]))
+    end
+    print("  (see docs/NEW_SEASON.md for the full per-season refresh runbook)")
+end
+
+-------------------------------------------------------------------------------
 -- entrypoint dispatch (called from core.lua slash handler)
 -------------------------------------------------------------------------------
 function D.Run(rest)
@@ -631,7 +789,9 @@ function D.Run(rest)
 
     local cmd, args = rest:match("^(%S+)%s*(.*)$")
     cmd = (cmd or ""):lower()
-    if cmd == "set" then
+    if cmd == "help" or cmd == "?" then
+        DiscoverHelp()
+    elseif cmd == "set" then
         DiscoverSet(args)
     elseif cmd == "variants" then
         DiscoverVariants(args)
@@ -641,10 +801,12 @@ function D.Run(rest)
         DiscoverSeason(args)
     elseif cmd == "all" then
         DiscoverAll()
+    elseif cmd == "feeders" then
+        DiscoverFeeders()
     elseif cmd == "currency" then
         DiscoverCurrency(args)
     else
         print("|cffff5555[SeasonalGoals]|r unknown subcommand: " .. cmd)
-        print("  /sg discover [sets|set <id>|variants <id>|season [name]|all|compile ...|currency <id>]")
+        print("  type |cffffd200/sg discover help|r for the list of subcommands.")
     end
 end

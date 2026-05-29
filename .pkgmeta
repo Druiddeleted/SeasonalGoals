@@ -7,5 +7,7 @@ ignore:
   - CLAUDE.md
   - LICENSE
   - README.md
+  - docs
+  - scripts
 
 manual-changelog: CHANGELOG.md

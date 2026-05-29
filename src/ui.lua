@@ -215,6 +215,35 @@ local function CellState(classFile, slotKey)
 end
 
 -- ===========================================================================
+-- "Where to get this" source info (shared by cell tooltip + detail panel)
+-- ===========================================================================
+-- Aggregate this slot's sources into deduped name lists for the hover tooltip:
+-- raid boss names and dungeon names. Sources are "Boss — Instance" strings, so
+-- we take the boss (before the dash) for raids and the instance (after) for
+-- dungeons. Direct tier sources + raid feeders feed the raid list; dungeon
+-- feeders feed the dungeon list.
+local function buildSourceSummary(classFile, slotKey, difficulty)
+    local raid, dungeon, seenR, seenD = {}, {}, {}, {}
+    local function addRaid(b) if b and not seenR[b] then seenR[b] = true; table.insert(raid, b) end end
+    local function addDungeon(d) if d and not seenD[d] then seenD[d] = true; table.insert(dungeon, d) end end
+    local function bossOf(src) return src and (src:match("^(.-) — ") or src) end
+    local function instOf(src) return src and (src:match(" — (.+)$") or src) end
+
+    local bosses = NS.Sources and NS.Sources.GetBosses
+        and NS.Sources.GetBosses(classFile, slotKey, difficulty)
+    if bosses then for _, b in ipairs(bosses) do addRaid(bossOf(b.source)) end end
+
+    local feeders = NS.Sources and NS.Sources.GetFeeders
+        and NS.Sources.GetFeeders(classFile, slotKey)
+    if feeders then
+        for _, f in ipairs(feeders) do
+            if f.dungeon then addDungeon(instOf(f.source)) else addRaid(bossOf(f.source)) end
+        end
+    end
+    return raid, dungeon
+end
+
+-- ===========================================================================
 -- Common helpers
 -- ===========================================================================
 local CLASS_ICON_TEX = "Interface\\TargetingFrame\\UI-Classes-Circles"
@@ -842,14 +871,35 @@ local function BuildFrame()
                 if sid then
                     tt:AddLine(("sourceID: %d"):format(sid), 0.5, 0.5, 0.5)
                 end
-                if s == "yellow" or s == "orange" then
+                -- Anything not collected (and not "no data") is actionable, so
+                -- summarize where it drops: raid boss names + dungeon names.
+                if s == "red" or s == "yellow" or s == "orange" then
+                    local raid, dungeon = buildSourceSummary(self.classFile, self.slotKey, t)
+                    if #raid > 0 then
+                        tt:AddLine(" ")
+                        tt:AddLine("Raid:", 1, 0.82, 0)
+                        for _, b in ipairs(raid) do tt:AddLine("  " .. b, 0.9, 0.9, 0.9) end
+                    end
+                    if #dungeon > 0 then
+                        tt:AddLine("Dungeon:", 1, 0.82, 0)
+                        for _, d in ipairs(dungeon) do tt:AddLine("  " .. d, 0.9, 0.9, 0.9) end
+                    end
                     tt:AddLine("Click for details.", 0.6, 0.6, 0.6)
+                end
+                -- GameTooltip reuses line FontStrings across tooltips; item
+                -- tooltips (feeder/item rows) can leave a larger font on a reused
+                -- line, making our names look inconsistently sized. Reset the
+                -- body lines (keep line 1, the title) to the default body font.
+                for i = 2, tt:NumLines() do
+                    local fs = _G["GameTooltipTextLeft" .. i]
+                    if fs then fs:SetFontObject(GameTooltipText) end
                 end
             end)
             cell:SetScript("OnClick", function(self)
-                -- Only yellow/orange cells have items worth detailing.
+                -- Red cells now open the detail panel too (for source info);
+                -- yellow/orange additionally list the items worth detailing.
                 local s = CellState(self.classFile, self.slotKey)
-                if s == "yellow" or s == "orange" then
+                if s == "red" or s == "yellow" or s == "orange" then
                     UI.ShowDetail(self.classFile, self.slotKey)
                 end
             end)
@@ -1100,6 +1150,63 @@ local DETAIL_ROW_H    = 38
 local DETAIL_ICON_W   = 32
 local DETAIL_HDR_H    = 22
 local DETAIL_BTN_W    = 78
+local FEEDER_ROW_H    = 22
+
+-- Compact row for a convertible-feeder item: icon + name + source label, with a
+-- full item tooltip on hover and shift-click to chat-link. `feeder` is
+-- { source = "Boss — Instance", itemID = N, dungeon = bool }.
+local function makeFeederRow(parent, feeder)
+    local row = CreateFrame("Button", nil, parent)
+    row:SetSize(440, FEEDER_ROW_H)
+    row:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+
+    local icon = row:CreateTexture(nil, "ARTWORK")
+    icon:SetPoint("LEFT", row, "LEFT", 0, 0)
+    icon:SetSize(18, 18)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    icon:SetTexture((C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(feeder.itemID))
+        or "Interface\\Icons\\INV_Misc_QuestionMark")
+
+    local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    fs:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+    fs:SetJustifyH("LEFT")
+    fs:SetWidth(404)
+
+    -- Item name/quality/link aren't available synchronously for an uncached
+    -- item (GetItemInfo returns nil), so render a placeholder now and fill in
+    -- via the async Item loader. The callback fires immediately if cached.
+    local src = feeder.source or "?"
+    local function render(name, quality, texture, link)
+        local label = name or ("item " .. tostring(feeder.itemID))
+        if name and quality and GetItemQualityColor then
+            local _, _, _, hex = GetItemQualityColor(quality)
+            if hex and hex ~= "" then label = "|c" .. hex .. name .. "|r" end
+        end
+        fs:SetText(("%s  |cff909090— %s|r"):format(label, src))
+        if texture then icon:SetTexture(texture) end
+        if link then row.feederLink = link end
+    end
+    render(nil)
+    if Item and Item.CreateFromItemID and feeder.itemID then
+        local it = Item:CreateFromItemID(feeder.itemID)
+        if it and not it:IsItemEmpty() then
+            it:ContinueOnItemLoad(function()
+                render(it:GetItemName(), it:GetItemQuality(), it:GetItemIcon(), it:GetItemLink())
+            end)
+        end
+    end
+
+    UI.AttachTooltip(row, function(self, tt)
+        if feeder.itemID then tt:SetItemByID(feeder.itemID) end
+    end)
+    row:SetScript("OnClick", function(self)
+        if IsShiftKeyDown() and ChatEdit_InsertLink then
+            local l = self.feederLink or select(2, GetItemInfo(feeder.itemID))
+            if l then ChatEdit_InsertLink(l) end
+        end
+    end)
+    return row
+end
 
 local function makeItemRow(parent, item, target, onToggle)
     local row = CreateFrame("Frame", nil, parent)
@@ -1240,6 +1347,49 @@ function UI.ShowDetail(classFile, slotKey)
         if color then fs:SetTextColor(color[1], color[2], color[3]) end
         place(fs, 16)
         return fs
+    end
+
+    -- "Where to get this" — the items you can get for this look and where they
+    -- drop. The tier token + curio (+ any known accessory) lead the Raid group;
+    -- convertible same-slot pieces follow, split into Raid and Dungeon.
+    do
+        header(("Where to get this (%s)"):format(target), { 1, 0.82, 0 })
+        local sc = f.scrollChild
+        local bosses = NS.Sources.GetBosses and NS.Sources.GetBosses(classFile, slotKey, target)
+        local feederList = NS.Sources.GetFeeders and NS.Sources.GetFeeders(classFile, slotKey)
+        local raidFeeders, dungeonFeeders = {}, {}
+        if feederList then
+            for _, fd in ipairs(feederList) do
+                if fd.dungeon then table.insert(dungeonFeeders, fd)
+                else table.insert(raidFeeders, fd) end
+            end
+        end
+
+        local haveAny = (bosses and #bosses > 0) or #raidFeeders > 0 or #dungeonFeeders > 0
+        if (bosses and #bosses > 0) or #raidFeeders > 0 then
+            note("Raid:", { 0.8, 0.8, 0.8 })
+            if bosses then
+                -- Tier token / curio / accessory: item row (icon + tooltip) when
+                -- we have an itemID, else a plain bullet.
+                for _, b in ipairs(bosses) do
+                    if b.itemID then
+                        place(makeFeederRow(sc, b), FEEDER_ROW_H + 2)
+                    else
+                        note("    • " .. b.source, { 0.85, 0.85, 0.85 })
+                    end
+                end
+            end
+            for _, fd in ipairs(raidFeeders) do place(makeFeederRow(sc, fd), FEEDER_ROW_H + 2) end
+        end
+        if #dungeonFeeders > 0 then
+            note("Dungeon:", { 0.8, 0.8, 0.8 })
+            for _, fd in ipairs(dungeonFeeders) do place(makeFeederRow(sc, fd), FEEDER_ROW_H + 2) end
+        end
+        if not haveAny then
+            note("No known item sources — catalyze any "
+                .. (SLOT_LABEL[slotKey] or slotKey) .. " piece.", { 0.6, 0.6, 0.6 })
+        end
+        y = y - 8
     end
 
     local foundClass = false

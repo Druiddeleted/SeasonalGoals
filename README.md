@@ -24,6 +24,23 @@ all enabled characters of that class). Hover a class icon to see a per-class
 progress summary; click an actionable cell to open a detail panel listing the
 items, what each could catalyze to, and a per-item exclude/include toggle.
 
+## Where to get missing items
+
+Hover any cell that isn't collected — including red (**Missing**) cells — for a
+quick "Drops from…" summary, then click it to open the detail panel's **"Where
+to get this"** list: every item you can get for that look and where it drops,
+grouped **Raid** and **Dungeon**.
+
+- The **Raid** group leads with the direct tier sources — the slot's tier token,
+  the curio (which converts into any tier slot), and any known matching-appearance
+  accessory — followed by convertible same-slot pieces from raid bosses.
+- The **Dungeon** group lists convertible same-slot pieces from the season's M+
+  pool (including legacy dungeons).
+
+Convertible pieces show as item rows — icon, name, and the boss/instance that
+drops them — with a full tooltip on hover and shift-click to link in chat. This
+source data ships with the addon per season.
+
 ## Multi-character
 
 State is aggregated per-class across every character on your account:
@@ -84,9 +101,12 @@ the season.
 
 Each new raid tier ships new appearance IDs and a new catalyst currency.
 At season start the addon maintainer runs the dev-mode discover tooling
-on one character per class, captures the data into `src/data_season.lua`,
-and ships an update. End users get the new tier just by updating the
-addon — no per-user setup.
+(`/sg discover all`) on one character per class and captures the appearance
+data into `src/data_season.lua`. The "where to get this" data in
+`src/data_sources.lua` — tier-token boss sources, feeder-content breakpoints,
+and any known accessory sources — is hand-maintained from the season's gear
+chart / raid guides, since it isn't exposed by a stable client API. End users
+get the new tier just by updating the addon — no per-user setup.
 
 ## Installation
 

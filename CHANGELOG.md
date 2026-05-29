@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0 — 2026-05-29
+
+### Where to get this
+- Cells now show **where to obtain** a tier appearance. Hover any non-collected
+  cell for a compact "Drops from: <boss>" summary; red (missing) cells are now
+  clickable and open the detail panel.
+- The detail panel's **"Where to get this"** lists every item you can get for the
+  look and where it drops, grouped **Raid** then **Dungeon**. The Raid group
+  leads with the tier token, the curio (any tier slot), and any known matching
+  accessory; convertible same-slot pieces follow as item rows (icon + name +
+  boss/instance, hover tooltip, shift-click to link).
+- Source data ships with the addon (`src/data_sources.lua` + generated
+  `src/data_feeders.lua`), refreshed per season via `/sg discover all` and
+  `/sg discover feeders` — no per-user setup. Convertible feeders cover the
+  Encounter Journal's current-season pool (raids + the full M+ rotation,
+  including legacy dungeons).
+
 ## 0.1.0 — Initial release
 
 First public release. Covers tier transmog tracking for all 13 classes at all
