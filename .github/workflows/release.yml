@@ -45,8 +45,10 @@ jobs:
             }
             found { print }
           ' CHANGELOG.md > RELEASE_NOTES.md
+          # Guard: this only trips when CHANGELOG.md is missing a section for
+          # the tag being released. On a normal release it stays quiet.
           if [ ! -s RELEASE_NOTES.md ]; then
-            echo "::error::No CHANGELOG.md section found for version $VERSION"
+            echo "::error::Add a '## $VERSION' section to CHANGELOG.md before tagging $VERSION."
             exit 1
           fi
           echo "----- RELEASE_NOTES.md -----"
