@@ -9,6 +9,7 @@ f:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 f:RegisterEvent("TRANSMOG_COLLECTION_UPDATED")
 f:RegisterEvent("ITEM_UPGRADE_MASTER_UPDATE")
 f:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+f:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 
 -- Has the addon collected the appearance (account-wide visual) for a given
 -- class+slot+difficulty? Used by Catalyst.PruneItems to decide if an item
@@ -52,6 +53,19 @@ local function refreshVisualsAndUI()
     end)
 end
 
+-- GET_ITEM_INFO_RECEIVED can fire many times in a single frame as a batch of
+-- items resolves. Coalesce to one detail-panel re-render per frame; UI.Refresh
+-- re-renders the open detail in place, which is all freshly-named items need.
+local detailRefreshPending = false
+local function refreshDetailSoon()
+    if detailRefreshPending then return end
+    detailRefreshPending = true
+    C_Timer.After(0, function()
+        detailRefreshPending = false
+        if NS.UI and NS.UI.Refresh then NS.UI.Refresh() end
+    end)
+end
+
 f:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
         NS.DB.Init()
@@ -73,6 +87,14 @@ f:SetScript("OnEvent", function(_, event, arg1)
         NS.Scanner.RefreshCollectedAppearances()
         refreshVisualsAndUI()
         pruneAllCharacters()
+    elseif event == "GET_ITEM_INFO_RECEIVED" then
+        -- Fires once per item whose data finishes loading client-side, often
+        -- in bursts and for items we don't track. Item names in the detail
+        -- panel fall back to "itemID N" until their data arrives, so re-render
+        -- only that panel (and only while it's open) to fill the names in.
+        if NS.UI and NS.UI.IsDetailShown and NS.UI.IsDetailShown() then
+            refreshDetailSoon()
+        end
     elseif event == "CURRENCY_DISPLAY_UPDATE" then
         -- Fires for every currency the game updates (gold, honor, marks…).
         -- Only react when it's our catalyst currency that changed; arg1 is

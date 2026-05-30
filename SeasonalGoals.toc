@@ -2,7 +2,7 @@
 ## Title: Seasonal Goals
 ## Notes: Track per-character progress toward seasonal goals (tier set transmog, more later).
 ## Author: Druiddeleted
-## Version: 0.2.0
+## Version: 0.2.1
 ## SavedVariables: SeasonalGoalsDB
 
 src\db.lua

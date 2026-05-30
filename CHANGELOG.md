@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 — 2026-05-30
+
+### Fixed
+- Detail-panel item rows that briefly showed a raw `itemID N` (because the
+  client hadn't finished loading the item's data) now fill in the real name
+  automatically as it arrives, instead of waiting for a reload. Listens for
+  `GET_ITEM_INFO_RECEIVED` and re-renders the open detail panel in place.
+
 ## 0.2.0 — 2026-05-29
 
 ### Where to get this

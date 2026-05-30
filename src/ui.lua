@@ -955,6 +955,13 @@ function UI.Refresh()
     end
 end
 
+-- True when the item-detail panel is currently visible. Lets event code
+-- (e.g. GET_ITEM_INFO_RECEIVED) skip work when nothing on screen depends on
+-- freshly-arrived item data.
+function UI.IsDetailShown()
+    return detailFrame ~= nil and detailFrame:IsShown()
+end
+
 function UI.Relayout()
     if not frame then return end
     relayoutGrid()
